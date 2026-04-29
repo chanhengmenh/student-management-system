@@ -28,16 +28,16 @@ monitoring/
 Push to main
     │
     ▼
-1 · SonarCloud Quality Scan   ──── FAIL → pipeline stops
+1 · Terraform Provision EC2   → AWS (SonarQube starts automatically)
     │
     ▼
-2 · Trivy Security Scan       ──── FAIL (CRITICAL CVE) → pipeline stops
+2 · SonarQube Quality Scan    ──── FAIL → pipeline stops
     │
     ▼
-3 · Build & Push Docker Images → Docker Hub
+3 · Trivy Security Scan       ──── FAIL (CRITICAL CVE) → pipeline stops
     │
     ▼
-4 · Terraform Provision EC2   → AWS
+4 · Build & Push Docker Images → Docker Hub
     │
     ▼
 5 · Deploy to EC2 via SSH     → live app + monitoring
@@ -53,10 +53,10 @@ Push to main
 | b | Reviewer approval                        | PR page → Approvals tab        |
 | c | Merge conflict markers + resolved file   | VS Code or GitHub diff view     |
 | d | Full CI/CD workflow file                 | `.github/workflows/ci-cd.yml` |
-| e | SonarCloud report                        | sonarcloud.io → your project   |
-| f | Trivy scan output                        | GitHub Actions → Job 2 logs    |
-| g | Pipeline stopped at quality gate failure | GitHub Actions → Job 1 failed  |
-| h | Terraform plan/apply output              | GitHub Actions → Job 4 logs    |
+| e | SonarQube report                         | `http://<EC2_IP>:9000` → your project |
+| f | Trivy scan output                        | GitHub Actions → Job 3 logs    |
+| g | Pipeline stopped at quality gate failure | GitHub Actions → Job 2 failed  |
+| h | Terraform plan/apply output              | GitHub Actions → Job 1 logs    |
 | i | Continuous deployment SSH output         | GitHub Actions → Job 5 logs    |
 | j | All 5 jobs green (graphical view)        | GitHub Actions → workflow run  |
 | k | Browser showing running app on EC2 IP    | `http://<EC2_IP>:5000`        |
@@ -157,46 +157,72 @@ git push origin feature/grading-update
 
 ---
 
-## PHASE 2 — SonarCloud Setup
+## PHASE 2 — SonarQube Setup
 
-### Step 2.1 — Create Account
+SonarQube runs automatically on your EC2 when Terraform provisions it (via `user_data.sh`). You just need to log in and generate a token once.
 
-1. Go to [sonarcloud.io](https://sonarcloud.io)
-2. Click **Log in with GitHub**
-3. Click **+** → **Analyze new project** → select your repo
-4. Note your **Organization key** and **Project key**
+### Step 2.1 — Run Terraform First (one-time)
 
-### Step 2.2 — Update sonar-project.properties
+Before the full pipeline works, you need the EC2 IP. Run Terraform locally once:
 
-Open `sonar-project.properties` and replace the placeholders:
-
-```properties
-sonar.projectKey=chanhengmenh_student-management-system
-sonar.organization=chanhengmenh
+```bash
+cd terraform
+terraform init
+terraform apply -auto-approve
 ```
 
-Example (if GitHub username is `menh`):
-
-```properties
-sonar.projectKey=menh_student-management-system
-sonar.organization=menh
+Note the EC2 IP from the output:
+```
+ec2_public_ip = "x.x.x.x"
 ```
 
-### Step 2.3 — Get SonarCloud Token
+### Step 2.2 — Access SonarQube in Browser
 
-1. SonarCloud → **My Account → Security → Generate Token**
-2. Name it `github-actions`
-3. Copy the token — you will add it to GitHub Secrets
+Wait ~3 minutes for SonarQube to fully start, then open:
 
-### Step 2.4 — Demo Quality Gate Failure (screenshot g)
+```
+http://<EC2_IP>:9000
+```
 
-To capture the pipeline stopping due to a failed quality gate:
+- Username: `admin`
+- Password: `admin`
+- It will immediately ask you to change the password — set a new one and save it
 
-1. SonarCloud → **Project → Administration → Quality Gates**
-2. Create a custom gate condition, e.g. **Coverage < 80%** or **Bugs > 0**
-3. Push any commit → Job 1 fails → Jobs 2–5 never run
-4. Take the screenshot
-5. Restore the gate back to **Sonar way** (default)
+### Step 2.3 — Create a Project in SonarQube
+
+1. Click **Create a local project**
+2. Project display name: `Student Management System`
+3. Project key: `student-management-system` (must match `sonar-project.properties`)
+4. Main branch name: `main`
+5. Click **Next** → select **Use the global setting** → click **Create project**
+
+### Step 2.4 — Generate a Token
+
+1. Top right → **My Account → Security**
+2. Generate token → name it `github-actions` → type: **Global Analysis Token**
+3. Click **Generate** → **copy the token immediately** (shown only once)
+4. Add it to GitHub Secrets as `SONAR_TOKEN`
+
+### Step 2.5 — Demo Quality Gate Failure (screenshot g)
+
+SonarQube self-hosted allows custom quality gates for free.
+
+1. SonarQube top menu → **Quality Gates**
+2. Click **Create** → name it `Force Fail`
+3. Click **Add Condition**:
+   - On: **Overall Code**
+   - Metric: **Lines of Code**
+   - Operator: **is greater than**
+   - Value: `1`
+4. Click **Save**
+5. Go to your project → **Project Settings → Quality Gate** → select `Force Fail`
+6. Push any empty commit to trigger the pipeline:
+   ```bash
+   git commit --allow-empty -m "ci: trigger quality gate failure demo"
+   git push origin main
+   ```
+7. Job 2 (SonarQube) fails → Jobs 3–5 never run → take **screenshot g**
+8. After the screenshot, go back to project → **Project Settings → Quality Gate** → select **Sonar way**
 
 ---
 
@@ -299,10 +325,10 @@ Go to GitHub repo → **Actions** tab → click the running workflow
 The 5 jobs run in sequence:
 
 ```
-1 · SonarCloud Quality Scan    ✅
-2 · Trivy Security Scan        ✅
-3 · Build & Push Docker Images ✅
-4 · Terraform Provision EC2    ✅
+1 · Terraform Provision EC2    ✅
+2 · SonarQube Quality Scan     ✅
+3 · Trivy Security Scan        ✅
+4 · Build & Push Docker Images ✅
 5 · Deploy to EC2              ✅
 ```
 
@@ -310,7 +336,7 @@ The 5 jobs run in sequence:
 
 ### Step 6.3 — Get Your EC2 IP
 
-In the Actions tab → click Job 4 (Terraform Provision EC2) → expand **Get EC2 public IP** step → copy the IP address.
+In the Actions tab → click Job 1 (Terraform Provision EC2) → expand **Get EC2 public IP** step → copy the IP address.
 
 Or from your terminal:
 
