@@ -5,9 +5,9 @@ variable "aws_region" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type (t2.micro is free tier eligible)"
+  description = "EC2 instance type (t2.medium needed — SonarQube requires 2GB RAM)"
   type        = string
-  default     = "t2.micro"
+  default     = "t2.medium"
 }
 
 variable "ec2_public_key" {

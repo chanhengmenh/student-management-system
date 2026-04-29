@@ -29,3 +29,19 @@ systemctl start docker
 # Create app directory for deployment
 mkdir -p /home/ubuntu/app/monitoring
 chown -R ubuntu:ubuntu /home/ubuntu/app
+
+# ── SonarQube requirements ─────────────────────────────────────
+sysctl -w vm.max_map_count=524288
+sysctl -w fs.file-max=131072
+echo "vm.max_map_count=524288" >> /etc/sysctl.conf
+echo "fs.file-max=131072" >> /etc/sysctl.conf
+
+# ── Start SonarQube via Docker ─────────────────────────────────
+docker run -d \
+  --name sonarqube \
+  --restart unless-stopped \
+  -p 9000:9000 \
+  -v sonarqube_data:/opt/sonarqube/data \
+  -v sonarqube_extensions:/opt/sonarqube/extensions \
+  -v sonarqube_logs:/opt/sonarqube/logs \
+  sonarqube:community
