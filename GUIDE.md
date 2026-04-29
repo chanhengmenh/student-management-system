@@ -171,8 +171,8 @@ git push origin feature/grading-update
 Open `sonar-project.properties` and replace the placeholders:
 
 ```properties
-sonar.projectKey=YOUR_GITHUB_USERNAME_student-management-system
-sonar.organization=YOUR_SONAR_ORG
+sonar.projectKey=chanhengmenh_student-management-system
+sonar.organization=chanhengmenh
 ```
 
 Example (if GitHub username is `menh`):
