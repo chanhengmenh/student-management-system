@@ -1,55 +1,257 @@
-name: CI/CD Pipeline for Student Management System
+name: "CI/CD Pipeline — Student Management System"
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  IMAGE_PREFIX: ${{ secrets.DOCKERHUB_USERNAME }}/sms
 
 jobs:
-  # Step 1: Build and push Docker images
-  build-and-push:
+  # ──────────────────────────────────────────────────────────
+  # JOB 1 · SonarCloud Quality Gate
+  # Pipeline STOPS here if quality gate fails
+  # ──────────────────────────────────────────────────────────
+  sonarcloud:
+    name: "1 · SonarCloud Quality Scan"
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        service: [add-service, delete-service, update-service, search-service]
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v2
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN:  ${{ secrets.SONAR_TOKEN }}
+
+      - name: Quality Gate Check (fail pipeline if gate fails)
+        uses: SonarSource/sonarqube-quality-gate-action@v1
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # ──────────────────────────────────────────────────────────
+  # JOB 2 · Trivy Security Scan
+  # Pipeline STOPS here if CRITICAL vulnerabilities found
+  # ──────────────────────────────────────────────────────────
+  trivy:
+    name: "2 · Trivy Security Scan"
+    runs-on: ubuntu-latest
+    needs: sonarcloud
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build images for scanning (local only, not pushed)
+        run: |
+          docker build -t scan/gateway ./api-gateway
+          docker build -t scan/add     ./add-service
+          docker build -t scan/delete  ./delete-service
+          docker build -t scan/update  ./update-service
+          docker build -t scan/search  ./search-service
+
+      - name: Scan filesystem dependencies
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          exit-code: '1'
+          severity: CRITICAL
+
+      - name: Scan api-gateway image
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          image-ref: scan/gateway
+          format: table
+          exit-code: '1'
+          severity: CRITICAL
+
+      - name: Scan add-service image
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          image-ref: scan/add
+          format: table
+          exit-code: '1'
+          severity: CRITICAL
+
+      - name: Scan delete-service image
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          image-ref: scan/delete
+          format: table
+          exit-code: '1'
+          severity: CRITICAL
+
+      - name: Scan update-service image
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          image-ref: scan/update
+          format: table
+          exit-code: '1'
+          severity: CRITICAL
+
+      - name: Scan search-service image
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          image-ref: scan/search
+          format: table
+          exit-code: '1'
+          severity: CRITICAL
+
+  # ──────────────────────────────────────────────────────────
+  # JOB 3 · Build & Push Docker Images to Docker Hub
+  # ──────────────────────────────────────────────────────────
+  build-push:
+    name: "3 · Build & Push Docker Images"
+    runs-on: ubuntu-latest
+    needs: trivy
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image
-        run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/${{ matrix.service }}:latest ./${{ matrix.service }}
-          docker push ${{ secrets.DOCKER_USERNAME }}/${{ matrix.service }}:latest
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-  # Step 2: Run unit tests after Docker builds
-  run-unit-tests:
-    needs: build-and-push
+      - name: Build & push api-gateway
+        uses: docker/build-push-action@v5
+        with:
+          context: ./api-gateway
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-gateway:latest
+            ${{ env.IMAGE_PREFIX }}-gateway:${{ github.sha }}
+
+      - name: Build & push add-service
+        uses: docker/build-push-action@v5
+        with:
+          context: ./add-service
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-add:latest
+            ${{ env.IMAGE_PREFIX }}-add:${{ github.sha }}
+
+      - name: Build & push delete-service
+        uses: docker/build-push-action@v5
+        with:
+          context: ./delete-service
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-delete:latest
+            ${{ env.IMAGE_PREFIX }}-delete:${{ github.sha }}
+
+      - name: Build & push update-service
+        uses: docker/build-push-action@v5
+        with:
+          context: ./update-service
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-update:latest
+            ${{ env.IMAGE_PREFIX }}-update:${{ github.sha }}
+
+      - name: Build & push search-service
+        uses: docker/build-push-action@v5
+        with:
+          context: ./search-service
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-search:latest
+            ${{ env.IMAGE_PREFIX }}-search:${{ github.sha }}
+
+  # ──────────────────────────────────────────────────────────
+  # JOB 4 · Terraform — Provision EC2 on AWS
+  # ──────────────────────────────────────────────────────────
+  terraform:
+    name: "4 · Terraform Provision EC2"
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        service: [add-service, delete-service, update-service, search-service]
-
+    needs: build-push
+    outputs:
+      ec2_ip: ${{ steps.get_ip.outputs.ec2_ip }}
+    env:
+      AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION:    ${{ secrets.AWS_REGION }}
+      TF_VAR_ec2_public_key: ${{ secrets.EC2_PUBLIC_KEY }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
-          node-version: '22'
+          terraform_wrapper: false
 
-      - name: Install dependencies and run tests
-        working-directory: ${{ matrix.service }}
-        run: |
-          npm install
-          npx jest --ci --runInBand
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: ./terraform
+        run: terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: ./terraform
+        run: terraform apply -auto-approve tfplan
+
+      - name: Get EC2 public IP
+        id: get_ip
+        working-directory: ./terraform
+        run: echo "ec2_ip=$(terraform output -raw ec2_public_ip)" >> $GITHUB_OUTPUT
+
+  # ──────────────────────────────────────────────────────────
+  # JOB 5 · Deploy Docker containers to EC2
+  # ──────────────────────────────────────────────────────────
+  deploy:
+    name: "5 · Deploy to EC2"
+    runs-on: ubuntu-latest
+    needs: terraform
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Wait for EC2 to be ready (Docker install)
+        run: sleep 90
+
+      - name: Copy compose files to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host:     ${{ needs.terraform.outputs.ec2_ip }}
+          username: ubuntu
+          key:      ${{ secrets.EC2_SSH_KEY }}
+          source:   "docker-compose.prod.yml,monitoring/"
+          target:   "/home/ubuntu/app"
+
+      - name: Deploy application + monitoring via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:     ${{ needs.terraform.outputs.ec2_ip }}
+          username: ubuntu
+          key:      ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            export DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
+
+            cd /home/ubuntu/app
+
+            echo "==> Pulling latest images..."
+            docker compose -p sms -f docker-compose.prod.yml pull
+
+            echo "==> Starting application stack..."
+            docker compose -p sms -f docker-compose.prod.yml up -d --remove-orphans
+
+            echo "==> Starting monitoring stack..."
+            docker compose -p sms -f monitoring/docker-compose.monitoring.yml up -d --remove-orphans
+
+            echo "==> Running containers:"
+            docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"

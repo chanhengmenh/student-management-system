@@ -1,0 +1,90 @@
+version: '3.8'
+
+# Production compose — pulls images from Docker Hub instead of building locally.
+# Requires DOCKERHUB_USERNAME environment variable.
+
+services:
+  mongodb:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - sms-network
+    restart: unless-stopped
+
+  api-gateway:
+    image: ${DOCKERHUB_USERNAME}/sms-gateway:latest
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - DOCKER=true
+    depends_on:
+      - add-service
+      - delete-service
+      - update-service
+      - search-service
+    networks:
+      - sms-network
+    restart: unless-stopped
+
+  add-service:
+    image: ${DOCKERHUB_USERNAME}/sms-add:latest
+    ports:
+      - "5001:5001"
+    environment:
+      - PORT=5001
+      - MONGO_URI=mongodb://mongodb:27017/student-management
+    depends_on:
+      - mongodb
+    networks:
+      - sms-network
+    restart: unless-stopped
+
+  delete-service:
+    image: ${DOCKERHUB_USERNAME}/sms-delete:latest
+    ports:
+      - "5002:5002"
+    environment:
+      - PORT=5002
+      - MONGO_URI=mongodb://mongodb:27017/student-management
+    depends_on:
+      - mongodb
+    networks:
+      - sms-network
+    restart: unless-stopped
+
+  update-service:
+    image: ${DOCKERHUB_USERNAME}/sms-update:latest
+    ports:
+      - "5003:5003"
+    environment:
+      - PORT=5003
+      - MONGO_URI=mongodb://mongodb:27017/student-management
+    depends_on:
+      - mongodb
+    networks:
+      - sms-network
+    restart: unless-stopped
+
+  search-service:
+    image: ${DOCKERHUB_USERNAME}/sms-search:latest
+    ports:
+      - "5004:5004"
+    environment:
+      - PORT=5004
+      - MONGO_URI=mongodb://mongodb:27017/student-management
+    depends_on:
+      - mongodb
+    networks:
+      - sms-network
+    restart: unless-stopped
+
+networks:
+  sms-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:

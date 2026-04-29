@@ -1,0 +1,17 @@
+variable "aws_region" {
+  description = "AWS region to deploy into"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "instance_type" {
+  description = "EC2 instance type (t2.micro is free tier eligible)"
+  type        = string
+  default     = "t2.micro"
+}
+
+variable "ec2_public_key" {
+  description = "SSH public key content — stored as GitHub secret EC2_PUBLIC_KEY"
+  type        = string
+  sensitive   = true
+}
