@@ -1,1 +1,1 @@
-console.log("This is the MAIN branch version.");
+console.log("Main branch: hotfix applied to grading.");
